@@ -2,7 +2,7 @@
 
 High-level view of how data moves through BHL, organised top-down: external sources feed dedicated harvesters, which push into the core hubs; core data is then processed, indexed, stored, and served via the API / web tier (or pushed to external destinations).
 
-External sources are drawn independently — they are unrelated systems with distinct harvest pipelines — and colour-coded along with their harvesters to make the ingest paths legible at a glance.
+Nodes are colour-coded by role: external sources (yellow), harvesters (green), external destinations (lavender). External sources are drawn independently — they are unrelated systems with distinct harvest pipelines. Audience is split into **public users** (who reach the Public Web Site and Public APIs) and **BHL members** (partner-institution staff who access the Admin Web Site and the Macaw authoring tool).
 
 ```mermaid
 flowchart TD
@@ -11,7 +11,6 @@ flowchart TD
     Flickr[Flickr]
     WD[Wikidata]
     Biostor[Biostor]
-    MacawSrv[Macaw Server]
 
     %% --- Harvesters, one per source/mode ---
     IAAnal[IA Analysis Harvest]
@@ -20,7 +19,6 @@ flowchart TD
     FlickrThumb[Flickr Thumb Grab]
     WDH[Wikidata Harvest]
     BiostorH[Biostor Harvest]
-    MacawOAI[Macaw OAI Harvest]
 
     subgraph Core["Core hubs"]
         PrivAPI[BHL Services<br/>Private API]
@@ -46,12 +44,16 @@ flowchart TD
         PubAPI[Public APIs]
         PubWeb[Public Web Site]
         AdminWeb[Admin Web Site]
-        MacawWeb[Macaw Web Site]
+        Macaw[Macaw<br/>BHL-hosted authoring tool]
     end
 
-    AWS[AWS]
-    Figshare[Figshare]
-    Users((Users))
+    subgraph Outbound["External destinations"]
+        AWS[AWS]
+        Figshare[Figshare]
+    end
+
+    PublicUsers((Public users))
+    BHLMembers((BHL members))
 
     %% --- Source -> harvester ---
     IA --> IAAnal
@@ -60,7 +62,6 @@ flowchart TD
     Flickr --> FlickrThumb
     WD --> WDH
     Biostor --> BiostorH
-    MacawSrv --> MacawOAI
 
     %% --- Harvester -> destinations ---
     IAAnal --> IAH
@@ -74,7 +75,6 @@ flowchart TD
     WDH --> PrivAPI
     BiostorH --> ImportDB
     BiostorH --> PrivAPI
-    MacawOAI --> MacawWeb
 
     %% --- Core internals ---
     ImportDB --> PrivAPI
@@ -97,10 +97,16 @@ flowchart TD
     SiteSvc --> PubWeb
     SiteSvc --> AdminWeb
     PubAPI --> PubWeb
-    PubAPI --> MacawWeb
-    Users --> PubWeb
-    Users --> AdminWeb
-    Users --> PubAPI
+    PubAPI --> Macaw
+
+    %% --- Audience ---
+    PublicUsers --> PubWeb
+    PublicUsers --> PubAPI
+    BHLMembers --> AdminWeb
+    BHLMembers --> Macaw
+
+    %% --- Macaw uploads to IA (content later flows back via IA Harvest) ---
+    Macaw -- "uploads books<br/>+ metadata" --> IA
 
     %% --- Outbound / side-effects ---
     Files --> AWS
@@ -112,8 +118,10 @@ flowchart TD
     %% --- Styling ---
     classDef source fill:#fff2b3,stroke:#b8860b,color:#000;
     classDef harvester fill:#c7e9c0,stroke:#2e7d32,color:#000;
-    class IA,Flickr,WD,Biostor,MacawSrv source;
-    class IAAnal,IAH,FlickrTag,FlickrThumb,WDH,BiostorH,MacawOAI harvester;
+    classDef destination fill:#d9d2e9,stroke:#674ea7,color:#000;
+    class IA,Flickr,WD,Biostor source;
+    class IAAnal,IAH,FlickrTag,FlickrThumb,WDH,BiostorH harvester;
+    class AWS,Figshare destination;
 ```
 
 ## Architectural hubs
@@ -126,6 +134,12 @@ Three components sit at the centre of the system and are worth naming explicitly
 
 **BHLImport DB** acts as a staging layer: harvesters write raw / partial records here before the Private API promotes them into BHL DB. **bhlindex** is a separate subsystem (PostgreSQL, running the Global Names tool) for taxonomic name indexing — it reads from BHL DB and Static Files but keeps its output in its own database rather than feeding back through the Private API.
 
+## Macaw and the IA loop
+
+Macaw (`/Users/rpage/Sites/macaw-book-metadata-tool`) is a PHP/CodeIgniter authoring tool BHL hosts for partner institutions to prepare page-level metadata for scanned books. **Macaw does not feed BHL directly.** Partner staff log in, assemble a book's metadata and images, and Macaw's export plugin uploads the package (`_scandata.xml`, `_marc.xml`, `_jp2.zip`, `_bhlcreators.xml`) to Internet Archive via S3 using each partner's own IA credentials. BHL later picks that content up through the standard IA Harvest pipeline. So the data path is effectively **BHL members → Macaw → IA → IA Harvest → BHL core** — Internet Archive appears on the diagram as both a source and a destination.
+
+(The earlier source diagram's "Macaw OAI Harvest" node was a misnomer: Macaw has no OAI-PMH endpoint. It consumes OAI feeds for import but does not expose one.)
+
 ## Harvest paths at a glance
 
 | Source | Harvester(s) | Destination(s) |
@@ -135,7 +149,8 @@ Three components sit at the centre of the system and are worth naming explicitly
 | Flickr | Flickr Thumb Grab | BHL Services API |
 | Wikidata | Wikidata Harvest | BHL Services API |
 | Biostor | Biostor Harvest | BHLImport DB, BHL Services API |
-| Macaw Server | Macaw OAI Harvest | Macaw Web Site (BHL-hosted archive) |
+
+Macaw-authored content reaches BHL indirectly via IA (see above).
 
 ## What's deliberately hidden here
 
