@@ -14,7 +14,7 @@ Goals:
   - [Ingest](diagrams/ingest.md) — external sources, harvesters, staging databases.
   - [Process](diagrams/process.md) — search indexing, PDF generation, OCR / text, name tools, exports.
   - [Serve](diagrams/serve.md) — APIs, web sites, and the protocol endpoints (OAI-PMH, OpenURL, IIIF, citations).
-- `diagrams/integration-seams.md` *(to be added)* — modularity view: every caller of the Private API, every MQ producer / consumer, every direct-DB writer.
+- [Integration seams](diagrams/integration-seams.md) — modularity view: who touches each major coupling point (Private API, RabbitMQ, BHL DB, Static Files, Elasticsearch, IA, SMTP) and what swapping it would cost.
 
 The original source diagram is preserved as `diagrams/BHL Internal Data Flows.drawio.svg` (and a PNG export) for reference.
 
