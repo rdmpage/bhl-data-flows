@@ -119,8 +119,8 @@ flowchart TD
 
 - **Text Import Processor** (`BHLTextImportProcessor/`) — scheduled batch. Processes admin-created import batches: downloads OCR CSV files from a configured HTTP share, updates page text in BHL DB, writes the OCR text to `Static Files`, and pushes MQ messages so the Search Indexer and PDF Generator pick up the changes.
 - **OCR Refresh** (`BHLOcrRefresh/`) — scheduled batch. Reads job files listing items whose OCR should be refreshed, re-fetches fresh OCR from Internet Archive, writes it to `Static Files`, updates BHL DB, pushes MQ for downstream indexing, and clears cached page names.
-- **Page Name Refresh** (`BHLPageNameRefresh/`) — scheduled batch. Reads OCR from `Static Files`, extracts taxonomic names, and writes resolved names back to BHL DB page records.
-- **bhlindex** — **external project** (Global Names tool; lives outside `bhl-us`). Reads BHL DB and `Static Files` and writes to its own PostgreSQL `bhlindex DB`. BHL integrates with it as a consumer.
+- **Page Name Refresh** (`BHLPageNameRefresh/`) — scheduled batch. Reads OCR from `Static Files`, uses the `gnfinder` library (from the Global Names project) to extract taxonomic names, and writes resolved names into BHL DB (`NamePage` / `Name` / `NameResolved` tables). This is the source of the per-page name lists shown on the live BHL site.
+- **bhlindex** — **separate project** (Global Names tool; lives outside `bhl-us`). Reads BHL DB and `Static Files` and writes to its own PostgreSQL `bhlindex DB`. Despite the similar name, this is a *different* GN tool from the `gnfinder` library Page Name Refresh uses, and its output (bhlindex DB) is **not** read by any BHL component — treat it as a parallel name-index data product built from BHL content rather than a source the BHL site queries.
 
 ### Exports & metadata
 

@@ -13,7 +13,7 @@ Goals:
 - Lifecycle sub-diagrams:
   - [Ingest](diagrams/ingest.md) — external sources, harvesters, staging databases.
   - [Process](diagrams/process.md) — search indexing, PDF generation, OCR / text, name tools, exports.
-  - `diagrams/serve.md` *(to be added)* — APIs and the web tier.
+  - [Serve](diagrams/serve.md) — APIs, web sites, and the protocol endpoints (OAI-PMH, OpenURL, IIIF, citations).
 - `diagrams/integration-seams.md` *(to be added)* — modularity view: every caller of the Private API, every MQ producer / consumer, every direct-DB writer.
 
 The original source diagram is preserved as `diagrams/BHL Internal Data Flows.drawio.svg` (and a PNG export) for reference.

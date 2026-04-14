@@ -95,8 +95,7 @@ flowchart TD
     BHLDB --> SiteSvc
     BHLDB --> PubAPI
     Files --> SiteSvc
-    ES --> PubAPI
-    BhlIndexDB --> PubAPI
+    ES --> PubWeb
     SiteSvc --> PubWeb
     SiteSvc --> AdminWeb
     PubAPI --> PubWeb
@@ -137,7 +136,7 @@ Three components sit at the centre of the system and are worth naming explicitly
 - **RabbitMQ** — the async backbone decoupling search indexing and PDF generation from the processes that trigger them.
 - **BHL DB** — the central production database that everything else orbits.
 
-**BHLImport DB** acts as a staging layer: harvesters write raw / partial records here before the Private API promotes them into BHL DB. **bhlindex** (the Global Names taxonomic name indexer) is grouped with the other batch processors on the diagram, but is architecturally distinctive — it reads from BHL DB and Static Files and writes to its own PostgreSQL `bhlindex DB` rather than feeding results back through the Private API.
+**BHLImport DB** acts as a staging layer: harvesters write raw / partial records here before the Private API promotes them into BHL DB. **bhlindex** (the Global Names tool) is grouped with the other batch processors on the diagram, but writes to its own PostgreSQL `bhlindex DB` — and **nothing in BHL reads that database back**. Treat it as a parallel name-index data product built from BHL content, not as a name source for the BHL site. Per-page names shown on biodiversitylibrary.org come from **BHL DB** instead, populated by `Page Name Refresh` using a different Global Names library (`gnfinder`) on OCR text.
 
 ## Macaw (standalone authoring tool)
 
