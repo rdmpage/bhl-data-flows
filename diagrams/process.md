@@ -1,24 +1,30 @@
 # Process
 
-What happens to data once it's in BHL. Scope: the batch processors and queue consumers that enrich, index, transform, and publish content already present in `BHL DB` and `Static Files`. The core boundary (BHL DB, Static Files, RabbitMQ, Elasticsearch, bhlindex DB, Private API) is shown muted to keep the focus on the processors; the processors are grouped by role.
+What happens to data once it's in BHL. Scope: the batch processors and queue consumers that enrich, index, transform, and publish content already present in `BHL DB` and `Static Files`. External inputs are at the top, the shared BHL-core boundary (read and written by Process) sits above the processors, and sinks — things only ever written to — are collected in an Outputs group at the bottom. Boundary nodes are shown muted; processors are grouped by role. The ✉ glyph on a node marks it as an email sender; email edges themselves are not drawn.
 
 ```mermaid
 flowchart TD
-    %% --- BHL core boundary (muted; populated by Ingest, consumed by Serve) ---
-    subgraph Core["BHL core"]
+    %% --- External inputs ---
+    subgraph ExtIn["External inputs"]
+        TextShare[OCR text<br/>HTTP share]
+        IAIn[Internet Archive<br/>re-fetch OCR]
+    end
+
+    %% --- Shared BHL core boundary (read AND written by Process) ---
+    subgraph Core["BHL core — shared"]
         BHLDB[(BHL DB)]
         Files[Static Files]
         MQ([RabbitMQ])
-        ES[(Elasticsearch)]
-        BhlIndexDB[(bhlindex DB)]
-        PrivAPI[BHL Services<br/>Private API]
     end
 
-    %% --- Processors grouped by role ---
-    subgraph SearchPDF["Search & PDF"]
+    %% --- Processors grouped by role (✉ = node sends email) ---
+    subgraph Search["Search"]
         SQL[Search Index<br/>Queue Load ✉]
-        SI["Search Indexer<br/>📧 direct SMTP"]
-        PDFGen["PDF Generator<br/>📧 direct SMTP (user)"]
+        SI[Search Indexer ✉]
+    end
+
+    subgraph PDF["PDF"]
+        PDFGen[PDF Generator ✉]
     end
 
     subgraph OCRNames["OCR & taxonomic names"]
@@ -35,81 +41,78 @@ flowchart TD
         Export[Export Processor ✉]
     end
 
-    %% --- External inputs / destinations ---
-    TextShare[Admin OCR<br/>HTTP share]
-    IA[Internet Archive]
-    CrossRef[CrossRef]
-    ExportFiles[Export files<br/>for user download]
-    AWS["AWS Open Data<br/>BHL open dataset<br/>(mirrored from IA)"]
-    Figshare["Figshare<br/>Smithsonian instance<br/>(OCR / text data dumps)"]
+    %% --- Outputs (sinks) ---
+    subgraph Outputs["Outputs"]
+        ES[(Elasticsearch)]
+        BhlIndexDB[(bhlindex DB)]
+        PrivAPI[BHL Services<br/>Private API]
+        ExportFiles[Export files<br/>for user download]
+        IAOut[Internet Archive<br/>S3 upload]
+        CrossRef[CrossRef]
+        AWS[AWS Open Data<br/>mirrored from IA]
+        Figshare[Figshare<br/>Smithsonian instance]
+    end
 
-    %% --- Search / PDF flow ---
+    %% --- External inputs -> processors ---
+    TextShare --> TextImp
+    IAIn --> OcrRef
+
+    %% --- Core reads ---
     BHLDB --> SQL
-    SQL --> MQ
-    MQ --> SI
-    SI --> ES
-
-    MQ --> PDFGen
     BHLDB --> PDFGen
     Files --> PDFGen
-    PDFGen --> Files
-
-    %% --- OCR / names flow ---
-    TextShare --> TextImp
-    TextImp --> Files
-    TextImp --> BHLDB
-    TextImp --> MQ
-
-    IA -- "re-fetch OCR" --> OcrRef
-    OcrRef --> Files
-    OcrRef --> BHLDB
-    OcrRef --> MQ
-
-    Files --> NameRef
+    MQ --> SI
+    MQ --> PDFGen
     BHLDB --> NameRef
-    NameRef --> BHLDB
-
+    Files --> NameRef
     BHLDB --> BhlIndex
     Files --> BhlIndex
-    BhlIndex --> BhlIndexDB
-
-    %% --- Exports & metadata flow ---
     BHLDB --> NameFile
     BHLDB --> METS
     BHLDB --> DOI
     BHLDB --> Export
 
-    NameFile -- "name XML" --> IA
-    METS -- "METS XML" --> IA
-    DOI --> CrossRef
+    %% --- Core writes ---
+    SQL --> MQ
+    PDFGen --> Files
+    TextImp --> Files
+    TextImp --> BHLDB
+    TextImp --> MQ
+    OcrRef --> Files
+    OcrRef --> BHLDB
+    OcrRef --> MQ
+    NameRef --> BHLDB
     DOI --> BHLDB
+
+    %% --- Writes to outputs ---
+    SI --> ES
+    BhlIndex --> BhlIndexDB
+    NameFile --> IAOut
+    METS --> IAOut
+    DOI --> CrossRef
     Export --> ExportFiles
     Export --> PrivAPI
 
-    %% --- Admin-notification email edges (via Private API) ---
-    SQL -. email .-> PrivAPI
-    TextImp -. email .-> PrivAPI
-    OcrRef -. email .-> PrivAPI
-    DOI -. email .-> PrivAPI
-    Export -. email .-> PrivAPI
-
-    %% --- Downstream public dataset targets (sync not driven by bhl-us code) ---
-    IA --> AWS
-    Files --> Figshare
+    %% --- AWS Open Data and Figshare: downstream publishing targets whose
+    %% conversion/upload pipelines are external to bhl-us. No edges drawn
+    %% from this diagram; source is described in each node's label. ---
 
     %% --- Styling ---
     classDef boundary fill:#eeeeee,stroke:#888,color:#333;
     classDef external fill:#fff2b3,stroke:#b8860b,color:#000;
     class BHLDB,Files,MQ,ES,BhlIndexDB,PrivAPI boundary;
-    class IA,CrossRef,TextShare,ExportFiles,AWS,Figshare external;
+    class TextShare,IAIn,IAOut,CrossRef,ExportFiles,AWS,Figshare external;
 ```
 
 ## What each processor does
 
-### Search & PDF
+### Search
 
-- **Search Index Queue Load** (`BHLSearchIndexQueueLoad/`) — scheduled batch. Reads BHL DB audit tables, pushes index/PDF/DOI messages into the relevant RabbitMQ queues.
+- **Search Index Queue Load** (`BHLSearchIndexQueueLoad/`) — scheduled batch. Reads BHL DB audit tables and pushes messages into RabbitMQ. Despite the name it doesn't only feed the search index: it writes to separate queues for the Search Indexer, PDF Generator, and DOI Processor.
 - **Search Indexer** (`BHLSearchIndexer/`) — continuous service. Consumes MQ messages, incrementally indexes items, pages, authors, keywords, and names into Elasticsearch (CATALOG / ITEMS / PAGES / AUTHORS / KEYWORDS / NAMES). **Talks to SMTP directly via MailKit for critical-error alerts** — the only in-repo component that bypasses the Private API's email endpoint.
+
+### PDF
+
 - **PDF Generator** (`BHLPDFGenerator/`) — scheduled batch. Reads pending PDF requests from BHL DB and PDF-queue messages from RabbitMQ, assembles pages from DJVU on `Static Files`, writes output PDFs back to `Static Files`, and **emails the requesting user directly** when each PDF is ready. There is only one PDF-builder project in `bhl-us`; the old diagram's Pre-Gen / Custom split doesn't correspond to separate executables.
 
 ### OCR & taxonomic names
@@ -128,19 +131,19 @@ flowchart TD
 
 ## Email notifications
 
-Two patterns coexist:
+Every node marked with ✉ sends email at some point in its run. Email edges themselves are not drawn — the glyph on the node is enough. Two patterns coexist under the glyph:
 
-- Most processors POST to `/v1/Email` on the Private API (marked ✉). They're dashed in the diagram to distinguish email from data edges.
-- **Search Indexer** and **PDF Generator** talk to SMTP directly — the Search Indexer for critical-error alerts (MailKit), the PDF Generator for "your PDF is ready" notifications to the user who requested it.
+- Most processors POST to `/v1/Email` on the BHL Services Private API, which talks to SMTP on their behalf. Admin summary/error notifications use this path.
+- **Search Indexer** and **PDF Generator** talk to SMTP directly — the Search Indexer for critical-error alerts, the PDF Generator for "your PDF is ready" messages sent to the user who requested it.
 
 ## Downstream public datasets
 
-Two destinations on the diagram are real but their synchronisation is **not** driven by code in `bhl-us`:
+Two destinations sit in the Outputs group with no incoming edges — their sync pipelines are **external to `bhl-us`**, and their node labels describe where the data originates rather than a diagram-drawn arrow:
 
-- **AWS Open Data** — BHL content is published as an AWS Open Data dataset ([`registry.opendata.aws/bhl-open-data/`](https://registry.opendata.aws/bhl-open-data/)). The dataset is mirrored from the BHL collection on Internet Archive rather than pushed directly from BHL's Static Files, so the edge is drawn `IA → AWS`.
-- **Figshare (Smithsonian instance)** — BHL deposits data dumps (notably OCR text) here. The export pipeline lives outside the `bhl-us` codebase.
+- **AWS Open Data** — BHL content is published as an AWS Open Data dataset ([`registry.opendata.aws/bhl-open-data/`](https://registry.opendata.aws/bhl-open-data/)). BHL content on Internet Archive is converted and published to AWS by a separate pipeline (not a direct IA → AWS sync). No edge is drawn because the conversion/publishing step isn't something this diagram covers.
+- **Figshare (Smithsonian instance)** — BHL deposits data dumps (notably OCR text) here. The export pipeline lives outside `bhl-us`.
 
-Separately, **Name File Generator** and **METS Upload** upload XML back to **Internet Archive S3** using IA credentials. That's a within-Process back-channel to IA (not to AWS), and is drawn directly.
+Separately, **Name File Generator** and **METS Upload** upload XML back to **Internet Archive S3** using IA credentials — that's a within-Process back-channel and *is* drawn (`NameFile / METS → IA S3 upload`).
 
 ## Hand-off to Serve
 
