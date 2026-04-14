@@ -44,13 +44,16 @@ flowchart TD
         PubAPI[Public APIs]
         PubWeb[Public Web Site]
         AdminWeb[Admin Web Site]
-        Macaw[Macaw<br/>BHL-hosted authoring tool]
     end
 
     subgraph Outbound["External destinations"]
         AWS[AWS]
         Figshare[Figshare]
     end
+
+    %% --- Standalone authoring tool (not connected to BHL internals) ---
+    Scans[Image scans]
+    Macaw[Macaw<br/>authoring tool]
 
     PublicUsers((Public users))
     BHLMembers((BHL members))
@@ -97,7 +100,6 @@ flowchart TD
     SiteSvc --> PubWeb
     SiteSvc --> AdminWeb
     PubAPI --> PubWeb
-    PubAPI --> Macaw
 
     %% --- Audience ---
     PublicUsers --> PubWeb
@@ -105,8 +107,10 @@ flowchart TD
     BHLMembers --> AdminWeb
     BHLMembers --> Macaw
 
-    %% --- Macaw uploads to IA (content later flows back via IA Harvest) ---
-    Macaw -- "uploads books<br/>+ metadata" --> IA
+    %% --- Macaw: separate authoring tool. No BHL integration; content
+    %% reaches BHL only via IA Harvest after Macaw uploads to IA. ---
+    Scans --> Macaw
+    Macaw -- "image files<br/>+ metadata" --> IA
 
     %% --- Outbound / side-effects ---
     Files --> AWS
@@ -134,11 +138,11 @@ Three components sit at the centre of the system and are worth naming explicitly
 
 **BHLImport DB** acts as a staging layer: harvesters write raw / partial records here before the Private API promotes them into BHL DB. **bhlindex** is a separate subsystem (PostgreSQL, running the Global Names tool) for taxonomic name indexing — it reads from BHL DB and Static Files but keeps its output in its own database rather than feeding back through the Private API.
 
-## Macaw and the IA loop
+## Macaw (standalone authoring tool)
 
-Macaw (`/Users/rpage/Sites/macaw-book-metadata-tool`) is a PHP/CodeIgniter authoring tool BHL hosts for partner institutions to prepare page-level metadata for scanned books. **Macaw does not feed BHL directly.** Partner staff log in, assemble a book's metadata and images, and Macaw's export plugin uploads the package (`_scandata.xml`, `_marc.xml`, `_jp2.zip`, `_bhlcreators.xml`) to Internet Archive via S3 using each partner's own IA credentials. BHL later picks that content up through the standard IA Harvest pipeline. So the data path is effectively **BHL members → Macaw → IA → IA Harvest → BHL core** — Internet Archive appears on the diagram as both a source and a destination.
+Macaw (`/Users/rpage/Sites/macaw-book-metadata-tool`; see `diagrams/macaw.png`) is a PHP/CodeIgniter tool that partner institutions use to prepare page-level metadata for scanned books. **It does not interact with any BHL component.** A member feeds image scans and title metadata into Macaw, fills in item- and page-level metadata, and the export plugin uploads the resulting package (`_scandata.xml`, `_marc.xml`, `_jp2.zip`, `_bhlcreators.xml`) to Internet Archive via S3 using each partner's own IA credentials. Content reaches BHL only indirectly, via the standard IA Harvest pipeline — so Internet Archive appears on the diagram as both a source (for BHL) and a destination (for Macaw).
 
-(The earlier source diagram's "Macaw OAI Harvest" node was a misnomer: Macaw has no OAI-PMH endpoint. It consumes OAI feeds for import but does not expose one.)
+(The earlier source diagram's "Macaw Server" / "Macaw OAI Harvest" nodes misrepresented the flow: Macaw has no OAI-PMH endpoint — it consumes OAI feeds for import but does not expose one — and has no direct link to BHL's Public APIs, database, or services.)
 
 ## Harvest paths at a glance
 
