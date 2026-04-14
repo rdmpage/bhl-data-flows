@@ -40,8 +40,8 @@ flowchart TD
     IA[Internet Archive]
     CrossRef[CrossRef]
     ExportFiles[Export files<br/>for user download]
-    AWS["AWS<br/>(ops-level; no code in bhl-us)"]
-    Figshare["Figshare<br/>(no code in bhl-us)"]
+    AWS["AWS Open Data<br/>BHL open dataset<br/>(mirrored from IA)"]
+    Figshare["Figshare<br/>Smithsonian instance<br/>(OCR / text data dumps)"]
 
     %% --- Search / PDF flow ---
     BHLDB --> SQL
@@ -93,17 +93,15 @@ flowchart TD
     DOI -. email .-> PrivAPI
     Export -. email .-> PrivAPI
 
-    %% --- Uncertain / ops-level sync paths (no bhl-us code found) ---
-    Files -. "ops sync?" .-> AWS
-    Files -. "OCR export?" .-> Figshare
+    %% --- Downstream public dataset targets (sync not driven by bhl-us code) ---
+    IA --> AWS
+    Files --> Figshare
 
     %% --- Styling ---
     classDef boundary fill:#eeeeee,stroke:#888,color:#333;
     classDef external fill:#fff2b3,stroke:#b8860b,color:#000;
-    classDef uncertain fill:#f4cccc,stroke:#b33,color:#000,stroke-dasharray:5 3;
     class BHLDB,Files,MQ,ES,BhlIndexDB,PrivAPI boundary;
-    class IA,CrossRef,TextShare,ExportFiles external;
-    class AWS,Figshare uncertain;
+    class IA,CrossRef,TextShare,ExportFiles,AWS,Figshare external;
 ```
 
 ## What each processor does
@@ -135,13 +133,14 @@ Two patterns coexist:
 - Most processors POST to `/v1/Email` on the Private API (marked ✉). They're dashed in the diagram to distinguish email from data edges.
 - **Search Indexer** and **PDF Generator** talk to SMTP directly — the Search Indexer for critical-error alerts (MailKit), the PDF Generator for "your PDF is ready" notifications to the user who requested it.
 
-## Uncertainties
+## Downstream public datasets
 
-- **AWS Sync** — the original drawio diagram showed `Static Files → AWS`. No C# project under `bhl-us` does this. It may be an operations-level cron/rclone script that lives outside the application codebase, or a planned feature that never shipped. Drawn dashed in pink to flag.
-- **OCR Export to Figshare** — same story: no matching code in `bhl-us`. Possibly an external or discontinued process. Drawn dashed in pink.
-- **Name File Generator and METS Upload** both upload to **Internet Archive** (via IA S3 credentials), not to any "BHL-owned AWS bucket". If the original diagram's "AWS" destination was meant to capture these, that was a mislabelling — the real target is IA.
+Two destinations on the diagram are real but their synchronisation is **not** driven by code in `bhl-us`:
 
-Both uncertainties are good candidates to resolve by asking BHL ops directly rather than inferring from code.
+- **AWS Open Data** — BHL content is published as an AWS Open Data dataset ([`registry.opendata.aws/bhl-open-data/`](https://registry.opendata.aws/bhl-open-data/)). The dataset is mirrored from the BHL collection on Internet Archive rather than pushed directly from BHL's Static Files, so the edge is drawn `IA → AWS`.
+- **Figshare (Smithsonian instance)** — BHL deposits data dumps (notably OCR text) here. The export pipeline lives outside the `bhl-us` codebase.
+
+Separately, **Name File Generator** and **METS Upload** upload XML back to **Internet Archive S3** using IA credentials. That's a within-Process back-channel to IA (not to AWS), and is drawn directly.
 
 ## Hand-off to Serve
 

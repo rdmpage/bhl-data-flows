@@ -52,8 +52,8 @@ flowchart TD
     BHLMembers((BHL members))
 
     subgraph Outbound["External destinations"]
-        AWS[AWS]
-        Figshare[Figshare]
+        AWS[AWS Open Data<br/>mirrored from IA]
+        Figshare[Figshare<br/>Smithsonian instance]
     end
 
     PublicUsers((Public users))
@@ -113,8 +113,9 @@ flowchart TD
     Macaw -- "image files<br/>+ metadata" --> IA
 
     %% --- Outbound / side-effects ---
-    Files --> AWS
-    Processing --> Figshare
+    %% AWS Open Data is mirrored from IA, not pushed from BHL's Static Files
+    IA --> AWS
+    Files --> Figshare
     PrivAPI --> SMTP
     SiteSvc --> SMTP
     Processing -. "direct, errors only" .-> SMTP
