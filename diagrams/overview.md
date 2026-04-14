@@ -29,8 +29,7 @@ flowchart TD
     end
 
     subgraph Processing["Batch processors"]
-        Processors[Search Indexer · PDF generators<br/>OCR / Text · Name tools<br/>DOI · METS · Export · AWS Sync]
-        BhlIndexTool[bhlindex<br/>taxonomic name indexer]
+        Processors[Search Indexer · PDF generators<br/>OCR / Text · Name tools · bhlindex<br/>DOI · METS · Export · AWS Sync]
     end
 
     subgraph Storage["Indexes & files"]
@@ -46,17 +45,18 @@ flowchart TD
         AdminWeb[Admin Web Site]
     end
 
+    %% --- Standalone authoring tool (not connected to BHL internals) ---
+    Scans[Image scans]
+    Macaw[Macaw<br/>authoring tool]
+
+    BHLMembers((BHL members))
+
     subgraph Outbound["External destinations"]
         AWS[AWS]
         Figshare[Figshare]
     end
 
-    %% --- Standalone authoring tool (not connected to BHL internals) ---
-    Scans[Image scans]
-    Macaw[Macaw<br/>authoring tool]
-
     PublicUsers((Public users))
-    BHLMembers((BHL members))
 
     %% --- Source -> harvester ---
     IA --> IAAnal
@@ -84,12 +84,12 @@ flowchart TD
     PrivAPI --> BHLDB
     BHLDB --> MQ
     MQ --> Processing
+    BHLDB --> Processing
+    Files --> Processing
     Processing --> PrivAPI
     Processing --> ES
     Processing --> Files
-    BHLDB --> BhlIndexTool
-    Files --> BhlIndexTool
-    BhlIndexTool --> BhlIndexDB
+    Processing --> BhlIndexDB
 
     %% --- Serving ---
     BHLDB --> SiteSvc
@@ -101,9 +101,9 @@ flowchart TD
     SiteSvc --> AdminWeb
     PubAPI --> PubWeb
 
-    %% --- Audience ---
-    PublicUsers --> PubWeb
-    PublicUsers --> PubAPI
+    %% --- Audience (public users receive data; BHL members contribute) ---
+    PubWeb --> PublicUsers
+    PubAPI --> PublicUsers
     BHLMembers --> AdminWeb
     BHLMembers --> Macaw
 
@@ -136,7 +136,7 @@ Three components sit at the centre of the system and are worth naming explicitly
 - **RabbitMQ** — the async backbone decoupling search indexing and PDF generation from the processes that trigger them.
 - **BHL DB** — the central production database that everything else orbits.
 
-**BHLImport DB** acts as a staging layer: harvesters write raw / partial records here before the Private API promotes them into BHL DB. **bhlindex** is a separate subsystem (PostgreSQL, running the Global Names tool) for taxonomic name indexing — it reads from BHL DB and Static Files but keeps its output in its own database rather than feeding back through the Private API.
+**BHLImport DB** acts as a staging layer: harvesters write raw / partial records here before the Private API promotes them into BHL DB. **bhlindex** (the Global Names taxonomic name indexer) is grouped with the other batch processors on the diagram, but is architecturally distinctive — it reads from BHL DB and Static Files and writes to its own PostgreSQL `bhlindex DB` rather than feeding results back through the Private API.
 
 ## Macaw (standalone authoring tool)
 
