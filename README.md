@@ -40,11 +40,11 @@ The most deeply coupled subsystem — touches five storage systems.
 ```
 IAAnalysis DB ──────────────────────────────► IA Harvest
 IA Analysis Harvest ──► IAAnalysis DB            │
-                                                  ├──► BHLImport DB        (IA item metadata)
-                                                  ├──► BHL DB
-                                                  ├──► Static Files        (Scandata/DJVU/MARC/OCR)
-                                                  ├──► Message Queue       (index + PDF messages)
-                                                  └──► BHL Services API
+                                                 ├──► BHLImport DB        (IA item metadata)
+                                                 ├──► BHL DB
+                                                 ├──► Static Files        (Scandata/DJVU/MARC/OCR)
+                                                 ├──► Message Queue       (index + PDF messages)
+                                                 └──► BHL Services API
 ```
 
 Key code: `IAHarvest/`, `IAHarvestAsync/`, `IAAnalysisHarvest/`, `BHLImportServer/`  
@@ -56,8 +56,8 @@ Database: `Database-BHLImport/` (~120 stored procedures)
 
 ```
 BHL DB ──► Search Queue Load ──► Message Queue ──► Search Indexer ──► Elasticsearch
-OCR Refresh ──────────────────► Message Queue
-Text Import Processor ────────► Message Queue
+OCR Refresh ───────────────────► Message Queue
+Text Import Processor ─────────► Message Queue
 ```
 
 Key code: `BHLSearchIndexer/`, `SearchElastic/`
@@ -69,7 +69,7 @@ Key code: `BHLSearchIndexer/`, `SearchElastic/`
 ```
 Static Files ──► SiteServices Private API     (served to web)
 Text Import Processor ──► OCR Files
-OCR Refresh ──────────► OCR Files
+OCR Refresh ────────────► OCR Files
 OCR Files ─┬──► OCR Export to Figshare
            └──► Name Refresh
 ```
@@ -93,8 +93,8 @@ Custom PDF Generator ───────────► BHL Services API      
 
 ```
 BHL DB ──► Name File Generator ──► BHL Services API
-OCR Files ──────────────────────► Name Refresh ──► BHL Services API
-bhlindex (GN tool) ─────────────► bhlindex DB
+OCR Files ───────────────────────► Name Refresh ──► BHL Services API
+bhlindex (GN tool) ──────────────► bhlindex DB
 ```
 
 Key code: `BHLSearchIndexer/` (name indexing), `IIIFUtility/NameManifest.cs` (name display)
