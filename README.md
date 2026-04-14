@@ -120,8 +120,8 @@ All follow the same pattern: fetch from external source → write via BHL Servic
 ```
 BHL DB ──► SiteServices Private API ─┬──► Public Web Site  (files + email)
                                      ├──► Admin Web Site   (files)
-                                     └──► Public APIs ─────► Public Web Site
-                                                       └──── Macaw Web Site
+                                     └──► Public APIs ─┬──► Public Web Site
+                                                       └──► Macaw Web Site
 BHL DB ──► Public APIs ──► Public Web Site
 BHL Services API ──► BHL DB
 ```
