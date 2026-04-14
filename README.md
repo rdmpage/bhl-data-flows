@@ -12,7 +12,7 @@ Goals:
 - [Overview](diagrams/overview.md) — the whole system in one picture.
 - Lifecycle sub-diagrams:
   - [Ingest](diagrams/ingest.md) — external sources, harvesters, staging databases.
-  - `diagrams/process.md` *(to be added)* — search indexing, PDF generation, OCR / text, name tools.
+  - [Process](diagrams/process.md) — search indexing, PDF generation, OCR / text, name tools, exports.
   - `diagrams/serve.md` *(to be added)* — APIs and the web tier.
 - `diagrams/integration-seams.md` *(to be added)* — modularity view: every caller of the Private API, every MQ producer / consumer, every direct-DB writer.
 
