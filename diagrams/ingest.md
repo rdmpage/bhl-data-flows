@@ -14,8 +14,9 @@ flowchart TD
     PartnerOAI[Partner library<br/>OAI-PMH feeds]
 
     %% --- Harvesters (✉ = posts admin notification via Private API /v1/Email) ---
-    IAAnal["IA Analysis Harvest ✉"]
-    IAH["IA Harvest ✉<br/>+ IA Harvest Async"]
+    IAAnal["IA Analysis Harvest ✉<br/>(discovery)"]
+    IAHAsync["IA Harvest Async ✉<br/>(orchestrator)"]
+    IAH["IA Harvest ✉<br/>(per-item worker)"]
     FlickrTag["Flickr Tag Harvest ✉"]
     FlickrThumb["Flickr Thumb Grab ✉"]
     WDH["Wikidata Harvest ✉"]
@@ -45,11 +46,14 @@ flowchart TD
     Biostor --> BiostorH
     PartnerOAI --> OAIH
 
-    %% --- Two-stage IA path: Analysis writes the signal IA Harvest then acts on ---
+    %% --- Three-stage IA pipeline: discovery -> orchestration -> per-item work ---
     IAAnal --> IAAnalDB
-    IAAnalDB --> IAH
+    IAAnalDB --> IAHAsync
+    ImportDB --> IAHAsync
+    IAHAsync --> ImportDB
+    IAHAsync -- "spawns parallel<br/>workers" --> IAH
 
-    %% --- Harvester destinations ---
+    %% --- Worker destinations ---
     IAH --> ImportDB
     IAH --> Files
     IAH --> MQ
@@ -72,13 +76,18 @@ flowchart TD
     classDef harvester fill:#c7e9c0,stroke:#2e7d32,color:#000;
     classDef boundary fill:#eeeeee,stroke:#888,color:#333;
     class IA,Flickr,WD,Biostor,PartnerOAI source;
-    class IAAnal,IAH,FlickrTag,FlickrThumb,WDH,BiostorH,OAIH harvester;
+    class IAAnal,IAHAsync,IAH,FlickrTag,FlickrThumb,WDH,BiostorH,OAIH harvester;
     class PrivAPI,BHLDB,Files,MQ boundary;
 ```
 
 ## How each pipeline works
 
-- **IA (two-stage)** — `IA Analysis Harvest` reads item/date metadata from Internet Archive and writes it into `IAAnalysis DB`. `IA Harvest` (and its newer sibling `IA Harvest Async`) reads that signal, then pulls DJVU/MARC/scandata/OCR files from IA, writes files to `Static Files`, stages records in `BHLImport DB`, sends messages to RabbitMQ (which drive the Search Indexer and PDF generator in Process), and commits through the Private API.
+- **IA (three-stage)** — a discovery / orchestration / worker split:
+  1. **`IA Analysis Harvest`** polls the Internet Archive OAI API, pulls metadata and MARC records for new or changed items, and writes them to **`IAAnalysis DB`**. Runs standalone on a schedule, one month of IA activity per pass.
+  2. **`IA Harvest Async`** is the orchestrator. It transfers rows from `IAAnalysis DB` into the `IAItem` queue in `BHLImport DB`, then spawns multiple `IA Harvest.exe` child processes in parallel. It does no harvesting itself — its job is just to dispatch work and track sets.
+  3. **`IA Harvest`** is the per-item worker. Called with phase flags (`/DOWNLOAD`, `/UPLOAD`, `/PUBLISH`), it fetches DJVU/MARC/scandata/OCR files from Internet Archive, writes them to **Static Files**, stages page-level records in **`BHLImport DB`**, sends messages to **RabbitMQ** (which drive the Search Indexer and PDF generator in Process), and commits through the **Private API**.
+
+  The split lets each stage scale and fail independently — discovery is light and frequent; the orchestrator controls concurrency; the workers do the heavy lifting in parallel.
 - **Flickr** — two harvesters. `Flickr Tag Harvest` scans Flickr photos for machine tags linking back to BHL pages and stages matches in `BHLImport DB`. `Flickr Thumb Grab` pulls thumbnails and submits them via the Private API.
 - **Wikidata** — `Wikidata Harvest` pulls bibliographic / authority data and commits via the Private API.
 - **Biostor** — `Biostor Harvest` pulls article / reference records, stages in `BHLImport DB`, and commits via the Private API.
@@ -104,6 +113,5 @@ The ingest pipeline lands data in four places that the Process sub-diagram picks
 
 ## What's not shown here
 
-- The IA Harvest source code is split across `IAHarvest/`, `IAHarvestAsync/`, and `IAAnalysisHarvest/`. Only the logical harvester roles are shown.
 - `Text Import Processor` and `OCR Refresh` can *look* like ingest because they produce OCR files, but they operate on items already in BHL — they live in the Process sub-diagram.
 - Macaw is not an ingest path to BHL. Partner-institution content authored in Macaw reaches BHL only via Internet Archive, picked up by IA Harvest like any other IA item (see overview).
