@@ -13,7 +13,8 @@ flowchart TD
     Biostor[Biostor]
     PartnerOAI[Partner library<br/>OAI-PMH feeds]
 
-    %% --- Harvesters (✉ = posts admin notification via Private API /v1/Email) ---
+    %% --- Harvesters (✉ = sends admin email; all also POST operational audit
+    %%     logs to /v1/InsertServiceLog. Neither path is drawn as an edge.) ---
     IAAnal["IA Analysis Harvest ✉<br/>(discovery)"]
     IAHAsync["IA Harvest Async ✉<br/>(orchestrator)"]
     IAH["IA Harvest ✉<br/>(per-item worker)"]
@@ -53,23 +54,26 @@ flowchart TD
     IAHAsync --> ImportDB
     IAHAsync -- "spawns parallel<br/>workers" --> IAH
 
-    %% --- Worker destinations ---
+    %% --- Worker destinations (direct DB writes via BHLProvider /
+    %%     BHLImportServer libraries, not over REST) ---
     IAH --> ImportDB
     IAH --> Files
     IAH --> MQ
-    IAH --> PrivAPI
+    IAH --> BHLDB
 
     FlickrTag --> ImportDB
-    FlickrTag --> PrivAPI
-    FlickrThumb --> PrivAPI
-    WDH --> PrivAPI
+    WDH --> BHLDB
     BiostorH --> ImportDB
-    BiostorH --> PrivAPI
+    BiostorH --> BHLDB
     OAIH --> ImportDB
 
-    %% --- Staging -> production promotion ---
-    ImportDB --> PrivAPI
-    PrivAPI --> BHLDB
+    %% --- Flickr Thumb Grab is the odd one out: reads a candidate page from the
+    %%     Private API (PageFlickr/Random), then fetches thumbnails from Flickr.
+    %%     No data write to the Private API. ---
+    PrivAPI -- "reads candidate<br/>pages from" --> FlickrThumb
+
+    %% --- Staging -> production promotion (in-process, via BHLImportServer) ---
+    ImportDB -- "publish to production<br/>(BHLImportServer library)" --> BHLDB
 
     %% --- Styling ---
     classDef source fill:#fff2b3,stroke:#b8860b,color:#000;
@@ -85,7 +89,7 @@ flowchart TD
 - **IA (three-stage)** — a discovery / orchestration / worker split:
   1. **`IA Analysis Harvest`** polls the Internet Archive OAI API, pulls metadata and MARC records for new or changed items, and writes them to **`IAAnalysis DB`**. Runs standalone on a schedule, one month of IA activity per pass.
   2. **`IA Harvest Async`** is the orchestrator. It transfers rows from `IAAnalysis DB` into the `IAItem` queue in `BHLImport DB`, then spawns multiple `IA Harvest.exe` child processes in parallel. It does no harvesting itself — its job is just to dispatch work and track sets.
-  3. **`IA Harvest`** is the per-item worker. Called with phase flags (`/DOWNLOAD`, `/UPLOAD`, `/PUBLISH`), it fetches DJVU/MARC/scandata/OCR files from Internet Archive, writes them to **Static Files**, stages page-level records in **`BHLImport DB`**, sends messages to **RabbitMQ** (which drive the Search Indexer and PDF generator in Process), and commits through the **Private API**.
+  3. **`IA Harvest`** is the per-item worker. Called with phase flags (`/DOWNLOAD`, `/UPLOAD`, `/PUBLISH`), it fetches DJVU/MARC/scandata/OCR files from Internet Archive, writes them to **Static Files**, stages page-level records in **`BHLImport DB`**, sends messages to **RabbitMQ** (which drive the Search Indexer and PDF generator in Process), and promotes records into **BHL DB** via the shared `BHLImportServer` library (direct DB writes, not REST).
 
   The split lets each stage scale and fail independently — discovery is light and frequent; the orchestrator controls concurrency; the workers do the heavy lifting in parallel.
 - **Flickr** — two harvesters. `Flickr Tag Harvest` scans Flickr photos for machine tags linking back to BHL pages and stages matches in `BHLImport DB`. `Flickr Thumb Grab` pulls thumbnails and submits them via the Private API.
@@ -93,9 +97,16 @@ flowchart TD
 - **Biostor** — `Biostor Harvest` pulls article / reference records, stages in `BHLImport DB`, and commits via the Private API.
 - **Partner OAI-PMH** — `OAI Harvester` is a generic harvester driven by configured sets in `BHLImport DB` (`vwOAIHarvestSet`); each set points at a partner library's OAI-PMH endpoint. Records land in `BHLImport DB` and are later published to production via `OAIRecordPublishToProduction`.
 
-## Email notifications
+## Operational endpoint (not drawn)
 
-Every harvester posts a completion / error summary to `/v1/Email` on the BHL Services Private API at the end of its run (marked ✉ on the nodes above). To avoid cluttering the diagram with eight identical edges, those calls aren't drawn individually — they all land at the Private API, which forwards to SMTP (see overview).
+All harvesters make two classes of Private API call that are *not* shown on the diagram:
+
+- **`/v1/InsertServiceLog`** — operational audit logging at the start / end of each run, via the shared `ServiceLogsClient`.
+- **`/v1/Email/Send`** — completion / error notifications via `EmailClient` (marked ✉ on the nodes above).
+
+These are ops and notifications rather than harvested-data flow, so drawing eight-plus identical edges to a `Private API` node would add clutter without information. The one genuine data call that *is* drawn is **Flickr Thumb Grab**'s `/v1/PageFlickr/Random` read — it's the only harvester that reads anything from the Private API.
+
+A consequence: the "Private API as write gateway" story — the idea that harvested data reaches BHL DB through the Private API — is **not** how ingest actually works. Harvesters write directly to the databases through `BHLImportServer` (for staging) and `BHLProvider` (for BHL DB). The integration-seams view flags this as a weakness in the Private API's modularity.
 
 ## Staging databases
 
@@ -104,12 +115,11 @@ Every harvester posts a completion / error summary to `/v1/Email` on the BHL Ser
 
 ## Hand-off to Process
 
-The ingest pipeline lands data in four places that the Process sub-diagram picks up from:
+The ingest pipeline lands data in three places that the Process sub-diagram picks up from:
 
-- **BHL DB** — the primary production target (written via the Private API).
+- **BHL DB** — the primary production target, written directly via `BHLProvider` / `BHLImportServer`.
 - **Static Files** — DJVU, scandata, MARC, raw OCR from IA.
 - **RabbitMQ** — index-and-PDF messages emitted by IA Harvest.
-- **BHL Services Private API** — trivially, all writes flow through it.
 
 ## What's not shown here
 

@@ -8,7 +8,7 @@ Each section below gives a focused mini-diagram, who depends on the seam, and a 
 
 | Seam | Touch-points | Modularity today | Swap difficulty |
 |------|--------------|------------------|-----------------|
-| BHL Services Private API (write gateway) | ~17 ingest + process components | Decent protocol boundary, many callers | Medium — protocol is clean, fan-out is wide |
+| BHL Services Private API | 7 data callers + 10 ops-only callers | Narrower than it first appears — most callers only use it for ops + email | Medium for the 7 data callers; trivial for the 10 ops-only |
 | RabbitMQ (async bus) | 4 producers, 2 consumers, ~3 queues | Clean producer/consumer split | **Low** — few parties, well-typed messages |
 | BHL DB (SQL Server) | Everything; some via API, some direct | Weak — several components bypass the API and write directly | **High** — schema touches every subsystem |
 | Static Files (file share) | Harvest + Process + SiteServices API | OK — path-based, but paths are scattered | Medium — would need a storage abstraction |
@@ -18,65 +18,68 @@ Each section below gives a focused mini-diagram, who depends on the seam, and a 
 
 ---
 
-## 1 · BHL Services Private API — the write gateway
+## 1 · BHL Services Private API
 
-The Private API is the single HTTP endpoint most background jobs use to commit data (and send notification emails). In principle, moving to a different write path means updating every caller.
+Most background jobs touch the Private API in some way, but the nature of the coupling varies sharply. A code audit of every `*Client` class instantiated in each caller splits them into three groups.
 
 ```mermaid
 flowchart LR
-    subgraph Ingest["Ingest callers"]
-        IAH[IA Harvest]
-        FlickrTag[Flickr Tag Harvest]
-        FlickrThumb[Flickr Thumb Grab]
-        WDH[Wikidata Harvest]
-        BiostorH[Biostor Harvest]
-        IAAnalH[IA Analysis Harvest]
-        IAHAsync[IA Harvest Async]
-        OAIH[OAI Harvester]
+    subgraph IngestData["Ingest — genuine data caller"]
+        FlickrThumb[Flickr Thumb Grab<br/>reads /v1/PageFlickr/Random]
     end
 
-    subgraph Process["Process callers"]
-        SQL[Search Index Queue Load]
-        TextImp[Text Import Processor]
+    subgraph ProcessData["Process — genuine data callers"]
+        PDFGen[PDF Generator]
         OcrRef[OCR Refresh]
+        PageNameRef[Page Name Refresh]
         NameFile[Name File Generator]
         DOI[DOI Processor]
         METS[METS Upload]
+    end
+
+    subgraph OpsOnly["Ops + email only — no data dependency on the API"]
+        IAAnalH[IA Analysis Harvest]
+        IAHAsync[IA Harvest Async]
+        IAH[IA Harvest]
+        FlickrTag[Flickr Tag Harvest]
+        WDH[Wikidata Harvest]
+        BiostorH[Biostor Harvest]
+        OAIH[OAI Harvester]
+        SQL[Search Index Queue Load]
+        TextImp[Text Import Processor]
         Export[Export Processor]
-        PDFGen[PDF Generator]
-        SI[Search Indexer]
     end
 
     PrivAPI((BHL Services<br/>Private API))
 
-    IAH --> PrivAPI
-    FlickrTag --> PrivAPI
     FlickrThumb --> PrivAPI
-    WDH --> PrivAPI
-    BiostorH --> PrivAPI
-    IAAnalH --> PrivAPI
-    IAHAsync --> PrivAPI
-    OAIH --> PrivAPI
-
-    SQL --> PrivAPI
-    TextImp --> PrivAPI
+    PDFGen --> PrivAPI
     OcrRef --> PrivAPI
+    PageNameRef --> PrivAPI
     NameFile --> PrivAPI
     DOI --> PrivAPI
     METS --> PrivAPI
-    Export --> PrivAPI
-    PDFGen --> PrivAPI
-    SI --> PrivAPI
+
+    IAAnalH -. "ServiceLog + Email" .-> PrivAPI
+    IAHAsync -. .-> PrivAPI
+    IAH -. .-> PrivAPI
+    FlickrTag -. .-> PrivAPI
+    WDH -. .-> PrivAPI
+    BiostorH -. .-> PrivAPI
+    OAIH -. .-> PrivAPI
+    SQL -. .-> PrivAPI
+    TextImp -. .-> PrivAPI
+    Export -. .-> PrivAPI
 
     classDef seam fill:#fcd,stroke:#b35,color:#000,stroke-width:2px;
     class PrivAPI seam;
 ```
 
-*(Some callers use the API only for email notifications, others for data writes, others for both. For modularity purposes the distinction doesn't matter — they all couple to the protocol.)*
-
-- **What it is.** An internal REST surface (currently colocated with `BHLWebServiceREST.v1`; the split between "Public" and "Private" is logical, not a separate deployment). Wraps BHL DB writes and `/v1/Email` notification sending.
-- **Swap notes.** The protocol itself is clean — every caller uses a small set of REST operations, so a replacement could preserve the interface shape (e.g. gRPC gateway, a message-based write bus). The fan-out is what makes it big: roughly 17 in-repo components would need re-pointing. In practice, a swap would be gradual: introduce the new endpoint, move harvesters one at a time, retire old routes.
-- **Possible improvements.** Currently no caching, rate-limiting, or auth between callers and API (they run on the same network). A gateway layer could add those without touching callers.
+- **What it is.** An internal REST surface (currently colocated with `BHLWebServiceREST.v1`; the "Public" vs "Private" split is logical, not a separate deployment). Exposes typed endpoints for items, pages, titles, segments, PDFs, DOIs, name-file logs, etc., plus operational endpoints `/v1/InsertServiceLog` (audit logs) and `/v1/Email/Send`.
+- **Genuine data callers (7).** One ingest (`FlickrThumbGrab`, which reads candidate pages via `PageFlickrClient`) and six process jobs that read/write real records via typed REST clients (`ItemsClient`, `PagesClient`, `PdfClient`, `DoiClient`, `BooksClient`, `SegmentsClient`, etc.). These are the callers whose code would have to change if the Private API's shape changed.
+- **Ops-only callers (10).** Every other ingest harvester plus `BHLSearchIndexQueueLoad`, `BHLTextImportProcessor`, and `BHLExportProcessor`. These components use **only** `ServiceLogsClient` and `EmailClient` — they write their real data directly to the databases through the `BHLImportServer` or `BHLProvider` .NET libraries, not over REST. Rerouting their ops telemetry and email to somewhere else is a configuration change, not an interface change.
+- **Swap notes.** The seam is much narrower than its raw caller count suggests: the 7 data callers are the real coupling, and they all use a small, typed set of REST operations. A replacement (gRPC gateway, message-based write bus, a fresh REST under a different host) could preserve the interface shape and migrate those 7 one at a time. The remaining 10 are effectively coupled only to `ServiceLog` and email — trivial to reroute.
+- **Honest caveat.** The "Private API as write gateway" aspiration is weaker than the old diagrams suggested. Most components that *appear* as Private API callers don't actually commit their data through it. Before the API can function as a real architectural gate (for rate-limiting, auth, swap-ability), the data writes currently going through the .NET libraries would need to move to REST.
 
 ---
 
@@ -124,43 +127,41 @@ The biggest and tightest seam. Everything either reads or writes here, and the A
 
 ```mermaid
 flowchart LR
-    subgraph ViaAPI["Via the Private API"]
-        IngestFarm[All ingest<br/>harvesters]
-        ProcessFarm[Most processors]
+    subgraph ViaAPI["Write via the Private API (REST)"]
+        ProcDataFarm[PDF Generator · OCR Refresh<br/>Page Name Refresh · Name File Generator<br/>DOI Processor · METS Upload]
     end
 
-    subgraph Direct["Direct DB access<br/>(bypasses the API)"]
-        PubWeb[Public Web Site]
+    subgraph ViaLib["Write via BHLProvider / BHLImportServer (direct DB)"]
+        IngestFarm[Ingest harvesters<br/>via BHLImportServer]
+        TextImp[Text Import Processor]
         AdminWeb[Admin Web Site]
+    end
+
+    subgraph APILayer["Read directly (they *are* the API tier)"]
         SiteSvc[SiteServices API]
         PubAPI[Public API]
-        TextImp[Text Import<br/>Processor]
-        OcrRef[OCR Refresh]
-        PageNameRef[Page Name Refresh]
-        PDFGen[PDF Generator]
+        PubWeb[Public Web Site<br/>for metadata reads]
     end
 
     BHLDB[(BHL DB)]
 
+    ProcDataFarm --> BHLDB
     IngestFarm --> BHLDB
-    ProcessFarm --> BHLDB
-
-    PubWeb --> BHLDB
+    TextImp --> BHLDB
     AdminWeb --> BHLDB
+
     SiteSvc --> BHLDB
     PubAPI --> BHLDB
-    TextImp --> BHLDB
-    OcrRef --> BHLDB
-    PageNameRef --> BHLDB
-    PDFGen --> BHLDB
+    PubWeb --> BHLDB
 
     classDef seam fill:#fcd,stroke:#b35,color:#000,stroke-width:2px;
     class BHLDB seam;
 ```
 
 - **What it is.** A large SQL Server schema accessed through a shared `BHLServer` / `BHLCoreDAL` .NET library. Most tables are shared across subsystems; stored procedures handle a lot of business logic.
-- **Swap notes.** In practice, changing the database engine itself is hard — the schema couples every subsystem, stored procedures aren't portable, and multiple code paths write directly. But *parts* of it could be peeled off: for example, moving the full-text search story entirely into Elasticsearch (and retiring DB-side search) is already partly done; moving name storage into a dedicated service is conceivable; splitting auth / accounts is another natural seam.
-- **Key friction.** The "Private API as write gateway" pattern is only aspirational. `BHLPageNameRefresh`, `BHLTextImportProcessor`, `BHLOcrRefresh`, `BHLPDFGenerator` all write directly. So does the Admin Web Site. Before the API seam is strong enough to rely on for modularity, these bypasses would need routing through it.
+- **Two write styles.** Six process jobs (PDF Generator, OCR Refresh, Page Name Refresh, Name File Generator, DOI Processor, METS Upload) already go through the Private API's typed REST clients for their data operations. The ingest harvesters, the Text Import Processor, and the Admin Web Site still write directly through `BHLImportServer` / `BHLProvider`. The API tier itself (SiteServices API, Public API, and the Public Web Site's metadata reads) reads the DB directly because it *is* the DB-facing layer.
+- **Swap notes.** Changing the database engine itself is hard — the schema couples every subsystem, stored procedures aren't portable. But *parts* of it could be peeled off: moving the full-text search story entirely into Elasticsearch (and retiring DB-side search) is already partly done; moving name storage into a dedicated service is conceivable; splitting auth / accounts is another natural seam.
+- **Key friction.** The remaining direct-DB writers (ingest harvesters, `BHLTextImportProcessor`, Admin Web Site) are what prevents the Private API from being a true architectural gate. Moving those writes through REST would let the API enforce rate-limiting, auth, and — most importantly — be swappable.
 
 ---
 
@@ -310,9 +311,9 @@ flowchart LR
 
 ## Summary
 
-The strongest modular boundaries in BHL today are **RabbitMQ**, **Elasticsearch** (via `SearchElastic/`), and the **per-harvester** pattern (each harvester is essentially self-contained against a single external system). The weakest are **BHL DB** (shared schema, multiple direct writers) and **Internet Archive** (structural dependency across ingest, display, and outbound publishing).
+The strongest modular boundaries in BHL today are **RabbitMQ**, **Elasticsearch** (via `SearchElastic/`), and the **per-harvester** pattern (each harvester is essentially self-contained against a single external system). The weakest are **BHL DB** (shared schema, still some direct writers) and **Internet Archive** (structural dependency across ingest, display, and outbound publishing).
 
 Two practical directions for BHL if modularity is a goal:
 
-1. **Make the Private API seam real.** Route the direct-DB writers (`BHLPageNameRefresh`, `BHLTextImportProcessor`, `BHLOcrRefresh`, `BHLPDFGenerator`, the admin web site) through the Private API. Once every write is mediated, the API becomes a swap point rather than a convention.
+1. **Finish the Private API as a write gateway.** The API is narrower than it first appears — only 7 callers have genuine data dependencies on it; the other 10 use it only for ops logs and email. The components that still write their real data directly to the database (principally the ingest harvesters via `BHLImportServer`, `BHLTextImportProcessor`, and the Admin Web Site) are what stop the API from being a true architectural gate. Routing those writes through REST would turn the Private API from a convention into a swap point where rate-limiting, auth, and replacement become possible.
 2. **Apply the `SearchElastic/` pattern.** The Elasticsearch seam is the cleanest in the codebase because a single shared library owns the external interface. Analogous shared libraries for file storage, email, and perhaps DB access would give those seams the same property.
