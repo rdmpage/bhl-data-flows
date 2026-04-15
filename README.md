@@ -21,3 +21,4 @@ The original source diagram is preserved as `diagrams/BHL Internal Data Flows.dr
 ## Notes
 
 - [Exploratory analysis](notes/analysis.md) — working notes from the initial walk-through of the codebase: infrastructure inventory, subsystem narratives, code pointers, and clarifications (e.g. what "email" edges really mean, and the current status of IIIF).
+- [InvenioRDM feasibility](notes/invenio-rdm-feasibility.md) — assessment of whether BHL could move to InvenioRDM as its platform, based on the data flows in this repo.
