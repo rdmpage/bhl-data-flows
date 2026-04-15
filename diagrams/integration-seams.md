@@ -60,16 +60,16 @@ flowchart LR
     DOI --> PrivAPI
     METS --> PrivAPI
 
-    IAAnalH -. "ServiceLog + Email" .-> PrivAPI
-    IAHAsync -. .-> PrivAPI
-    IAH -. .-> PrivAPI
-    FlickrTag -. .-> PrivAPI
-    WDH -. .-> PrivAPI
-    BiostorH -. .-> PrivAPI
-    OAIH -. .-> PrivAPI
-    SQL -. .-> PrivAPI
-    TextImp -. .-> PrivAPI
-    Export -. .-> PrivAPI
+    IAAnalH -. "ServiceLog<br/>+ Email" .-> PrivAPI
+    IAHAsync -.-> PrivAPI
+    IAH -.-> PrivAPI
+    FlickrTag -.-> PrivAPI
+    WDH -.-> PrivAPI
+    BiostorH -.-> PrivAPI
+    OAIH -.-> PrivAPI
+    SQL -.-> PrivAPI
+    TextImp -.-> PrivAPI
+    Export -.-> PrivAPI
 
     classDef seam fill:#fcd,stroke:#b35,color:#000,stroke-width:2px;
     class PrivAPI seam;
