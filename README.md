@@ -21,6 +21,10 @@ Goals:
 
 The original source diagram is preserved as `diagrams/BHL Internal Data Flows.drawio.svg` (and a PNG export) for reference.
 
+## Services
+
+- [gnfinder](services/gnfinder.md) — the Global Names taxonomic name-finding tool used by BHL's Page Name Refresh pipeline.
+
 ## Notes
 
 - [Exploratory analysis](notes/analysis.md) — working notes from the initial walk-through of the codebase: infrastructure inventory, subsystem narratives, code pointers, and clarifications (e.g. what "email" edges really mean, and the current status of IIIF).
