@@ -15,6 +15,9 @@ Goals:
   - [Process](diagrams/process.md) — search indexing, PDF generation, OCR / text, name tools, exports.
   - [Serve](diagrams/serve.md) — APIs, web sites, and the protocol endpoints (OAI-PMH, OpenURL, IIIF, citations).
 - [Integration seams](diagrams/integration-seams.md) — modularity view: who touches each major coupling point (Private API, RabbitMQ, BHL DB, Static Files, Elasticsearch, IA, SMTP) and what swapping it would cost.
+- Object lifecycles:
+  - [IA item](diagrams/item-lifecycle.md) — how a single IA item travels from discovery to serving, with metadata flowing back to IA.
+  - [PDF](diagrams/pdf-lifecycle.md) — how a PDF is requested, generated from DJVU, delivered, and eventually expired.
 
 The original source diagram is preserved as `diagrams/BHL Internal Data Flows.drawio.svg` (and a PNG export) for reference.
 
