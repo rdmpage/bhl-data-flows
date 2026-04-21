@@ -1,0 +1,35 @@
+Event,Frequency
+TASK - PageNameRefresh,Daily
+DB - CHECKDB (Limited) BHL/BHLQA/BHLImport/BHLAuditArchive,"Mon,Tue,Wed,Fri,Sat"
+DB - CHECKDB (Full) BHL/BHLQA/BHLImport/BHLAuditArchive,"Thu,Sun"
+DB - CHECKDB (Limited) BHLImportQA/BHLAuditArchiveQA/IAAnalysisQA,"Mon,Tue,Wed,Thu,Fri,Sat"
+DB - CHECKDB (Full) BHLImportQA/BHLAuditArchiveQA/IAAnalysisQA,Sun
+DB - CHECKDB (Limited) IAAnalysis,"Mon,Tue,Wed,Thu,Fri,Sun"
+DB - CHECKDB (Full) IAAnalysis,Sat
+DB - DB Backups (BHL/BHLImport/BHLAuditArchive),Daily
+DB - DB Backups (BHLQA),"Tue,Thu,Sun"
+DB - DB Backups (IAAnalysis),Sat
+DB - DB Backups (BHLImportQA/BHLAuditArchiveQA/IAAnalysisQA),Sun
+TASK - BioStorHarvest,Daily
+TASK - OAIHarvest,Daily
+TASK - FlickrThumbGrab,Daily
+DB - Reset Pagination Locks,Daily
+DB - Remove Inactive NamePages,Daily
+DB - Publish To Production,Daily
+TASK - DOIService (Submit),Daily
+TASK - METS Upload,Daily
+DB - System DB Maintenance,Daily
+DB - Archive Audit Data,Daily
+TASK - NameFileGenerator,Daily
+TASK - DOIService (Verify),Daily
+DB - Update Monthly Stats,Daily
+DB - Entity Count Refresh,Daily
+DB - RequestLog Rollup,Daily
+TASK - IAIDExport,Wed
+DB - Log Server Perf Metrics,Wed
+DB - IAAnalysis Rollup,Wed
+DB - Index Optimization (Prod),Sat
+DB - Index Optimization (QA),Sun
+TASK - IAAnalysisHarvest,Sat
+TASK - IAHarvest,Sat
+TASK - ExportProcessor,Fri
