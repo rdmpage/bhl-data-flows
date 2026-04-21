@@ -15,14 +15,14 @@ flowchart TD
 
     %% --- Harvesters (✉ = sends admin email; all also POST operational audit
     %%     logs to /v1/InsertServiceLog. Neither path is drawn as an edge.) ---
-    IAAnal["IA Analysis Harvest ✉<br/>(discovery)"]
-    IAHAsync["IA Harvest Async ✉<br/>(orchestrator)"]
-    IAH["IA Harvest ✉<br/>(per-item worker)"]
+    IAAnal["IA Analysis Harvest ✉<br/>(discovery)<br/>⏱ Sat"]
+    IAHAsync["IA Harvest Async ✉<br/>(orchestrator)<br/>⏱ Sat"]
+    IAH["IA Harvest ✉<br/>(per-item worker)<br/>⏱ Sat"]
     FlickrTag["Flickr Tag Harvest ✉"]
-    FlickrThumb["Flickr Thumb Grab ✉"]
+    FlickrThumb["Flickr Thumb Grab ✉<br/>⏱ Daily"]
     WDH["Wikidata Harvest ✉"]
-    BiostorH["Biostor Harvest ✉"]
-    OAIH["OAI Harvester ✉"]
+    BiostorH["Biostor Harvest ✉<br/>⏱ Daily"]
+    OAIH["OAI Harvester ✉<br/>⏱ Daily"]
 
     %% --- Staging databases ---
     subgraph Staging["Staging"]
@@ -73,7 +73,7 @@ flowchart TD
     PrivAPI -- "reads candidate<br/>pages from" --> FlickrThumb
 
     %% --- Staging -> production promotion (in-process, via BHLImportServer) ---
-    ImportDB -- "publish to production<br/>(BHLImportServer library)" --> BHLDB
+    ImportDB -- "publish to production<br/>(BHLImportServer library)<br/>⏱ Daily" --> BHLDB
 
     %% --- Styling ---
     classDef source fill:#fff2b3,stroke:#b8860b,color:#000;

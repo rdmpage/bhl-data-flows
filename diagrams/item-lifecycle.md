@@ -8,23 +8,23 @@ Each node is a **state the item is in**; each edge is labelled with the **servic
 flowchart TD
     A([Item exists on<br/>Internet Archive])
 
-    A -->|IA Analysis Harvest<br/>polls IA OAI API| B[Metadata catalogued<br/>in IAAnalysis DB]
+    A -->|IA Analysis Harvest<br/>⏱ Sat| B[Metadata catalogued<br/>in IAAnalysis DB]
 
-    B -->|IA Harvest Async<br/>transfers to download queue| C[Queued for harvest<br/>in BHLImport DB]
+    B -->|IA Harvest Async<br/>⏱ Sat| C[Queued for harvest<br/>in BHLImport DB]
 
-    C -->|IA Harvest worker<br/>fetches from IA| D[Files downloaded<br/>DJVU · OCR · scandata · MARC<br/>→ Static Files]
+    C -->|IA Harvest worker<br/>⏱ Sat| D[Files downloaded<br/>DJVU · OCR · scandata · MARC<br/>→ Static Files]
 
-    D -->|IA Harvest worker<br/>stages page records| E[Pages staged<br/>in BHLImport DB]
+    D -->|IA Harvest worker| E[Pages staged<br/>in BHLImport DB]
 
-    E -->|BHLImportServer<br/>publishes to production| F([In production<br/>BHL DB + Static Files])
+    E -->|BHLImportServer<br/>⏱ Daily| F([In production<br/>BHL DB + Static Files])
 
-    F -->|Search Index Queue Load<br/>+ Search Indexer via MQ| G[Indexed for search<br/>in Elasticsearch]
+    F -->|Search Indexer<br/>⏱ continuous| G[Indexed for search<br/>in Elasticsearch]
 
-    F -->|Search Index Queue Load<br/>+ PDF Generator via MQ| H[Pre-gen PDF created<br/>in Static Files]
+    F -->|PDF Generator<br/>⏱ continuous| H[Pre-gen PDF created<br/>in Static Files]
 
-    F -->|Page Name Refresh<br/>runs gnfinder on OCR| I[Taxonomic names<br/>extracted per page<br/>→ BHL DB]
+    F -->|Page Name Refresh<br/>⏱ Daily| I[Taxonomic names<br/>extracted per page<br/>→ BHL DB]
 
-    F -->|DOI Processor<br/>submits to CrossRef| J[DOI minted<br/>→ BHL DB]
+    F -->|DOI Processor<br/>⏱ Daily| J[DOI minted<br/>→ BHL DB]
 
     G & H & I & J --> K([Item fully enriched])
 
@@ -36,9 +36,9 @@ flowchart TD
 
     L -->|via IA collection| O[Mirrored to<br/>AWS Open Data]
 
-    F -->|METS Upload| P[METS XML uploaded<br/>to IA S3]
+    F -->|METS Upload<br/>⏱ Daily| P[METS XML uploaded<br/>to IA S3]
 
-    F -->|Name File Generator| Q[Name index XML uploaded<br/>to IA S3]
+    F -->|Name File Generator<br/>⏱ Daily| Q[Name index XML uploaded<br/>to IA S3]
 
     P & Q -.->|metadata returns<br/>to Internet Archive| A
 
@@ -69,17 +69,23 @@ This closes the loop: the item started on IA, was harvested into BHL, was enrich
 
 ## Timing
 
-Not everything happens at once. The stages have different latencies:
+Not everything happens at once. Based on BHL's actual task schedule (see `tasks.csv`):
 
-| Stage | Trigger | Typical latency after harvest |
-|-------|---------|-------------------------------|
-| Search indexing | MQ message (near-real-time consumer) | Seconds to minutes |
-| PDF generation | MQ message (batch consumer) | Minutes to hours |
-| Name extraction | Scheduled batch (Page Name Refresh) | Hours to days |
-| DOI minting | Scheduled batch (DOI Processor) | Hours to days |
-| METS / name-file upload to IA | Daily / scheduled batch | Up to 24 hours |
+| Stage | Schedule | Worst-case lag after item appears on IA |
+|-------|----------|-----------------------------------------|
+| Discovery (IA Analysis Harvest) | **Sat** | Up to 7 days (weekly) |
+| Harvest (IA Harvest) | **Sat** | Same Saturday run (or the next one if discovery just ran) |
+| Search indexing | **Continuous** (MQ consumer) | Seconds to minutes after harvest |
+| PDF generation | **Continuous** (MQ consumer) | Minutes to hours after harvest |
+| Name extraction (Page Name Refresh) | **Daily** | Up to 24 hours after harvest |
+| DOI minting (DOI Processor) | **Daily** (submit + verify) | Up to 24 hours after harvest |
+| METS upload to IA | **Daily** | Up to 24 hours after harvest |
+| Name-file upload to IA | **Daily** | Up to 24 hours after harvest |
+| Staging → production promotion | **Daily** (DB task) | Up to 24 hours for records staged in BHLImport DB |
 
-A freshly harvested item may appear on the site without names, a DOI, or a pre-generated PDF for a while. Search availability is the fastest downstream step.
+The **IA harvest pipeline is the bottleneck**: both discovery and harvest run only on Saturdays. A new item uploaded to IA on Sunday won't enter BHL until the following Saturday — up to a week's lag. Once the item is harvested, downstream enrichment is much faster: search is near-real-time (continuous MQ consumer), and everything else runs daily.
+
+A freshly harvested item will appear on the site searchable within minutes, but may lack names, a DOI, or a pre-generated PDF until the daily batch jobs run.
 
 ## What this reveals
 

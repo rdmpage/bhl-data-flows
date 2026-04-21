@@ -20,25 +20,25 @@ flowchart TD
     %% --- Processors grouped by role (✉ = node sends email) ---
     subgraph Search["Search"]
         SQL[Search Index<br/>Queue Load ✉]
-        SI[Search Indexer ✉]
+        SI["Search Indexer ✉<br/>⏱ continuous"]
     end
 
     subgraph PDF["PDF"]
-        PDFGen[PDF Generator ✉]
+        PDFGen["PDF Generator ✉<br/>⏱ continuous"]
     end
 
     subgraph OCRNames["OCR & taxonomic names"]
         TextImp[Text Import Processor ✉]
         OcrRef[OCR Refresh ✉]
-        NameRef[Page Name Refresh]
+        NameRef["Page Name Refresh<br/>⏱ Daily"]
         BhlIndex[bhlindex<br/>external Global Names tool]
     end
 
     subgraph ExportsMeta["Exports & metadata"]
-        NameFile[Name File Generator]
-        METS[METS Upload]
-        DOI[DOI Processor ✉]
-        Export[Export Processor ✉]
+        NameFile["Name File Generator<br/>⏱ Daily"]
+        METS["METS Upload<br/>⏱ Daily"]
+        DOI["DOI Processor ✉<br/>⏱ Daily (submit + verify)"]
+        Export["Export Processor ✉<br/>⏱ Fri"]
     end
 
     %% --- Outputs (sinks) ---
