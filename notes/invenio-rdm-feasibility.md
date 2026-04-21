@@ -93,7 +93,7 @@ The weakest seams are the next refactors:
 
 This path moves BHL toward a modular, maintainable shape *without* committing to a platform replacement that doesn't natively serve the page-centric data model.
 
-## Where Invenio could legitimately help
+## Where Invenio could legitimately help (conservative view)
 
 Niche components alongside BHL, not a wholesale replacement:
 
@@ -101,9 +101,108 @@ Niche components alongside BHL, not a wholesale replacement:
 - A **DOI minting** service, if decoupling from CrossRef via a more modern stack becomes worthwhile.
 - A separate **Invenio instance alongside BHL**, not in place of it, for dataset publication workflows that don't fit the page-centric reading experience.
 
+---
+
+## Alternative framing: InvenioRDM as headless backend
+
+The assessment above assumes InvenioRDM would replace everything — backend, frontend, task scheduling, the lot. A more interesting question: **what if InvenioRDM replaces only the backend infrastructure** (data management, file storage, task scheduling, REST API), with a custom frontend for the public-facing UI, and IA treated as a separate concern?
+
+### The architecture
+
+```
+┌─────────────────────────────────────────────────────┐
+│  Custom public frontend (React / Next.js / etc.)    │
+│  Queries OpenSearch directly for search + browse     │
+│  Renders page reader, names, citations               │
+└────────────────────┬────────────────────────────────┘
+                     │ REST API
+┌────────────────────▼────────────────────────────────┐
+│  InvenioRDM (headless backend)                       │
+│  ┌──────────────┐  ┌──────────────┐                 │
+│  │ Record mgmt  │  │ File storage │                 │
+│  │ (PostgreSQL) │  │ (S3-compat)  │                 │
+│  └──────────────┘  └──────────────┘                 │
+│  ┌──────────────┐  ┌──────────────┐                 │
+│  │ OpenSearch   │  │ Celery +     │                 │
+│  │ indexing     │  │ Celery Beat  │                 │
+│  └──────────────┘  └──────────────┘                 │
+│  Built-in: OAI-PMH · DOI · REST API · file checks   │
+└─────────────────────────────────────────────────────┘
+                     │ Celery tasks
+┌────────────────────▼────────────────────────────────┐
+│  BHL-specific Celery tasks                           │
+│  Harvesters · gnfinder names · PDF generation        │
+│  METS/name-file upload · AWS/Figshare export         │
+└─────────────────────────────────────────────────────┘
+```
+
+### What this sidesteps
+
+- **UI mismatch** — gone. The frontend is custom either way. Zenodo's record-list UI is irrelevant if it's never shown to users. The custom frontend queries OpenSearch (which InvenioRDM manages) and renders whatever BHL needs: bibliographic hierarchy, page reader, name lists, search results.
+- **IA as a monolithic dependency** — factored out. InvenioRDM's `invenio-files-rest` manages content (images, OCR, DJVU) in S3-compatible object storage. IA becomes *one possible source* of content (via harvest tasks) rather than the only place content lives. BHL could serve page images from its own storage, or continue embedding IA BookReader, or adopt IIIF — the backend doesn't care.
+- **Task scheduling split** — unified. Celery replaces both Windows Task Scheduler (cron-style triggers) and the current RabbitMQ consumer pattern (async processing) with one framework. BHL's ~12 scheduled tasks become Celery Beat entries; the continuous consumers (Search Indexer, PDF Generator) become persistent Celery workers.
+
+### What changes
+
+| BHL component | Current | On InvenioRDM |
+|--------------|---------|---------------|
+| BHL DB (SQL Server) | Central schema, `BHLProvider` / `BHLCoreDAL` | InvenioRDM's PostgreSQL + custom record types |
+| Static Files (NAS) | Shared filesystem with path-based access | `invenio-files-rest` + S3-compatible object storage |
+| Elasticsearch | Written by Search Indexer, read via `SearchElastic/` | OpenSearch managed by InvenioRDM; custom frontend queries it |
+| RabbitMQ | Async message passing | Celery (uses RabbitMQ or Redis as broker under the hood) |
+| Windows Task Scheduler | Triggers batch .exe apps | Celery Beat crontab entries |
+| BHL Services Private API | Aspirational write gateway (7 real data callers) | InvenioRDM REST API + custom endpoints |
+| BHLImport DB (staging) | Separate SQL Server database | Invenio deposit/draft workflow (records in draft state before publishing) |
+| OAI-PMH server | Custom `OAI2` library in `BHLUSWeb2` | `invenio-oaiserver` (built-in) |
+| DOI minting | Custom `BHLDOIService` → CrossRef | `invenio-rdm-records` DOI integration (DataCite native; CrossRef possible) |
+| Search Index Queue Load | Batch job that detects DB changes → MQ | Celery signals on record create/update → auto-index |
+
+### The page addressability question
+
+This is the crux. InvenioRDM's record model doesn't natively have sub-record entities like "pages". Three approaches:
+
+1. **Pages as files with rich metadata.** Each page = a file object in the record, with custom metadata (sequence number, OCR text hash, name list). InvenioRDM's `invenio-files-rest` supports per-file metadata. Page images, OCR text files, and DJVU files are all file objects attached to the item record. The custom frontend resolves `/page/{id}` by querying the record's file list. **Trade-off:** addressing a single page means fetching the record and filtering. For items with thousands of pages, this needs efficient indexing.
+
+2. **Pages as nested metadata.** The item record's metadata JSON contains a `pages` array with per-page entries (sequence, OCR text reference, names). Page images are linked by file key. **Trade-off:** large metadata documents for big items, but OpenSearch handles nested objects well for search. This is essentially how IIIF manifests work — a single JSON document describing all pages.
+
+3. **Pages as child records.** Each page is its own InvenioRDM record, linked to the parent item via Invenio's relation system. Each page is independently addressable, searchable, and can carry its own files and metadata. **Trade-off:** record count explodes (BHL has millions of pages), but this gives the cleanest addressability and maps well to how BHL currently treats pages (each page has its own ID, URL, and metadata).
+
+Approach (3) is the most natural fit for BHL's page-centric model but needs scale testing. Approach (2) is the most pragmatic starting point. A hybrid (item metadata has lightweight page stubs; OCR text and names live in the search index only, not in the record) might be the sweet spot.
+
+### What you'd gain
+
+- **Modern Python stack** with an active community, replacing aging C# / ASP.NET Web Forms.
+- **PostgreSQL** replacing SQL Server (open-source, better tooling ecosystem, no licensing cost).
+- **Unified task infrastructure** (Celery) replacing the Windows Task Scheduler + RabbitMQ split.
+- **Built-in OAI-PMH, DOI, REST API, file management** — no longer hand-rolled.
+- **S3-compatible file storage** — makes mirroring to AWS Open Data and Figshare a natural extension of the file layer rather than an external script.
+- **InvenioRDM's deposit workflow** could replace the `BHLImport DB` staging pattern — records start as drafts, go through validation, and get published. That's essentially what staging → production promotion does today.
+
+### What you'd still have to build
+
+- **The custom frontend.** But BHL would need a new frontend regardless of backend — the current Web Forms / MVC hybrid is aging.
+- **Harvesters.** The IA trio, Biostor, OAI, Flickr, Wikidata harvesters need reimplementing as Celery tasks that create/update InvenioRDM records. The logic is BHL-specific; the scheduling and execution framework is Celery.
+- **gnfinder integration.** A Celery task that reads OCR from the record's files, calls gnfinder, and writes names back as record metadata. Straightforward.
+- **PDF generation.** Port the iTextSharp logic to Python (e.g. reportlab, PyMuPDF, or pikepdf). The two-trigger-path lifecycle (user-requested + segment-based) maps onto Celery tasks cleanly.
+- **Legacy API compatibility.** `/api2` and `/api3` consumers would need a compatibility shim or a migration path.
+- **The page addressability extension.** Whichever approach is chosen, it's custom Invenio work.
+- **Outbound publishing.** AWS Open Data and Figshare sync as Celery tasks — the packaging/conversion logic is BHL-specific.
+
+### Revised assessment
+
+Under this framing, the assessment shifts from **"probably not the right bet"** to **"a plausible architecture if you're willing to invest in the page model."**
+
+The key contingencies:
+
+1. **Page addressability must be proven.** Build a prototype: one InvenioRDM instance, one BHL item with 500 pages, confirm that pages are addressable, searchable, and performant. This is a bounded experiment (weeks, not months) that would de-risk the whole approach.
+2. **IA decoupling is optional.** InvenioRDM can manage its own files AND still embed IA BookReader for page display — the two aren't mutually exclusive. Start with InvenioRDM managing metadata + OCR + names, keep IA for images initially, and migrate image hosting later if/when BHL wants to.
+3. **The frontend is a separate project.** Don't let the backend choice constrain the frontend. A custom frontend on OpenSearch works regardless of whether the backend is InvenioRDM, the current .NET stack, or something else.
+4. **Migration is incremental, not big-bang.** Start with one harvester (e.g. Biostor, which is the simplest), one record type (items), and one enrichment task (name extraction). Prove the pipeline end-to-end before committing to a full migration.
+
 ## Caveats
 
 - Invenio's most recent extension capabilities may be more flexible than this note assumes — worth checking with InvenioRDM maintainers before ruling out a more ambitious integration.
-- CERN's CDS (CERN Document Server) runs on Invenio in a library-shaped configuration; if anyone has built a page-level reading platform on Invenio, CDS is where to look. I suspect the answer is "no", but a yes would shift the assessment.
+- CERN's CDS (CERN Document Server) runs on Invenio in a library-shaped configuration; if anyone has built a page-level reading platform on Invenio, CDS is where to look. I suspect the answer is "no", but a yes would strengthen the case.
 - The data-flow diagrams in this repo are documentation, not production audits. The BHL source code may have since evolved, and direct conversation with BHL engineers would surface constraints this note doesn't.
 - The task-scheduling assessment is based on general knowledge of Celery/Celery Beat, not a direct test with BHL's task definitions. The mapping looks clean on paper but operational details (error handling, retry logic, monitoring, Windows-to-Linux migration for task hosts) would need validating.
+- Scale: BHL has millions of pages. If pages become InvenioRDM records (approach 3), the record count is large. OpenSearch handles this but InvenioRDM's record-management layer needs benchmarking at that scale.
